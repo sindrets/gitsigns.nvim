@@ -48,7 +48,6 @@ local record CacheEntry
   compare_text  : {string}  -- For use with internal diff
   hunks         : {Hunk}
   staged_diffs  : {Hunk}
-  pending_signs : {integer:Sign}
   index_watcher : uv.FSPollObj -- Timer object watching the files index
   git_obj       : git.Obj
   commit        : string
@@ -64,7 +63,7 @@ local function get_cursor_hunk(bufnr: integer, hunks: {Hunk}): Hunk
   return gs_hunks.find_hunk(lnum, hunks)
 end
 
-local function apply_win_signs(bufnr: integer, pending: {integer:Sign}, top: integer, bot: integer)
+local function apply_win_signs(bufnr: integer, hunks: {Hunk}, top: integer, bot: integer)
   -- If called without top or bot, then assume this is the first call after
   -- clearing all the signs
   local first_apply = top == nil
@@ -78,12 +77,13 @@ local function apply_win_signs(bufnr: integer, pending: {integer:Sign}, top: int
     bot = bot or vim.fn.line('$')
   end
 
+  local pending = process_hunks(hunks, {top, bot})
+
   local scheduled: {integer:Sign} = {}
 
   local function schedule_sign(n: integer, _: any)
     if n and pending[n] then
       scheduled[n] = pending[n]
-      pending[n] = nil
     end
   end
 
@@ -95,9 +95,9 @@ local function apply_win_signs(bufnr: integer, pending: {integer:Sign}, top: int
     signs.remove(bufnr)  -- Remove all signs
 
     -- To stop the sign column width changing too much, if there are signs to be
-    -- added but none of them are visible in the window, then make sure to add at
-    -- least one sign. Only do this on the first call after an update when we all
-    -- the signs have been cleared.
+    -- added but none of them are visible in the window, then make sure to add
+    -- at least one sign. Only do this on the first call after an update when we
+    -- all the signs have been cleared.
     if config.use_decoration_api then
       schedule_sign(next(pending))
     end
@@ -138,13 +138,12 @@ local update = async(function(bufnr: integer, bcache: CacheEntry)
     await(git_obj:get_show(compare_object, bcache.compare_file))
     bcache.hunks = await(git.run_diff(bcache.compare_file, buftext, config.diff_algorithm))
   end
-  bcache.pending_signs = process_hunks(bcache.hunks)
 
   await(scheduler())
 
   -- Apply signs to the window. Other signs will be added by the decoration
   -- provider as they are drawn.
-  apply_win_signs(bufnr, bcache.pending_signs)
+  apply_win_signs(bufnr, bcache.hunks)
 
   Status:update(bufnr, gs_hunks.get_summary(bcache.hunks, git_obj.abbrev_head))
 
@@ -682,10 +681,10 @@ local function setup_decoration_provider()
   api.nvim_set_decoration_provider(namespace, {
     on_win = function(_, _, bufnr: integer, top: integer, bot: integer): boolean
       local bcache = cache[bufnr]
-      if not bcache or not bcache.pending_signs then
+      if not bcache or not bcache.hunks then
         return
       end
-      apply_win_signs(bufnr, bcache.pending_signs, top+1, bot+1)
+      apply_win_signs(bufnr, bcache.hunks, top+1, bot+1)
     end
   })
 end

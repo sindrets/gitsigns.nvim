@@ -10,10 +10,13 @@ local feed          = helpers.feed
 local exec_lua      = helpers.exec_lua
 local eq            = helpers.eq
 local matches       = helpers.matches
-local sleep         = helpers.sleep
 local split         = helpers.split
 local get_buf_var   = helpers.curbufmeths.get_var
 local system        = helpers.funcs.system
+
+local sleep = function(ms)
+  helpers.sleep(ms*4)
+end
 
 local function check_status(status)
   eq(status.head, get_buf_var('gitsigns_head'))

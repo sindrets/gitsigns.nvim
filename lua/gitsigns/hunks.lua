@@ -77,28 +77,30 @@ function M.parse_diff_line(line)
    return hunk
 end
 
-function M.process_hunks(hunks)
+function M.process_hunks(hunks, range)
    local signs = {}
    for _, hunk in ipairs(hunks) do
-      local count = hunk.type == 'add' and hunk.added.count or hunk.removed.count
-      for i = hunk.start, hunk.dend do
-         local topdelete = hunk.type == 'delete' and i == 0
-         local changedelete = hunk.type == 'change' and hunk.removed.count > hunk.added.count and i == hunk.dend
+      if not range or (hunk.start <= range[2] and hunk.vend >= range[1]) then
+         local count = hunk.type == 'add' and hunk.added.count or hunk.removed.count
+         for i = hunk.start, hunk.dend do
+            local topdelete = hunk.type == 'delete' and i == 0
+            local changedelete = hunk.type == 'change' and hunk.removed.count > hunk.added.count and i == hunk.dend
 
-         signs[topdelete and 1 or i] = {
-            type = topdelete and 'topdelete' or changedelete and 'changedelete' or hunk.type,
-            count = i == hunk.start and count,
-         }
-      end
-      if hunk.type == "change" then
-         local add, remove = hunk.added.count, hunk.removed.count
-         if add > remove then
-            local count_diff = add - remove
-            for i = 1, count_diff do
-               signs[hunk.dend + i] = {
-                  type = 'add',
-                  count = i == 1 and count_diff,
-               }
+            signs[topdelete and 1 or i] = {
+               type = topdelete and 'topdelete' or changedelete and 'changedelete' or hunk.type,
+               count = i == hunk.start and count,
+            }
+         end
+         if hunk.type == "change" then
+            local add, remove = hunk.added.count, hunk.removed.count
+            if add > remove then
+               local count_diff = add - remove
+               for i = 1, count_diff do
+                  signs[hunk.dend + i] = {
+                     type = 'add',
+                     count = i == 1 and count_diff,
+                  }
+               end
             end
          end
       end
