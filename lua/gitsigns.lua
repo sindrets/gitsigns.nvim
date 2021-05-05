@@ -16,16 +16,10 @@ local Sign = signs.Sign
 local gs_config = require('gitsigns.config')
 local Config = gs_config.Config
 
-local mk_repeatable = require('gitsigns.repeat').mk_repeatable
-
 local apply_mappings = require('gitsigns.mappings')
-
 local git = require('gitsigns.git')
 local util = require('gitsigns.util')
-
 local gs_hunks = require("gitsigns.hunks")
-local process_hunks = gs_hunks.process_hunks
-local Hunk = gs_hunks.Hunk
 
 local gs_debug = require("gitsigns.debug")
 local dprint = gs_debug.dprint
@@ -42,27 +36,9 @@ local config
 
 local namespace
 
-local CacheEntry = {}
-
-
-
-
-
-
-
-
-
-
-
-local cache = {}
-
-local function get_cursor_hunk(bufnr, hunks)
-   bufnr = bufnr or current_buf()
-   hunks = hunks or cache[bufnr].hunks
-
-   local lnum = api.nvim_win_get_cursor(0)[1]
-   return gs_hunks.find_hunk(lnum, hunks)
-end
+local gs_cache = require('gitsigns.cache')
+local CacheEntry = gs_cache.CacheEntry
+local cache = gs_cache.cache
 
 local function apply_win_signs(bufnr, pending, top, bot)
 
@@ -138,7 +114,7 @@ local update = async(function(bufnr, bcache)
       await(git_obj:get_show(compare_object, bcache.compare_file))
       bcache.hunks = await(git.run_diff(bcache.compare_file, buftext, config.diff_algorithm))
    end
-   bcache.pending_signs = process_hunks(bcache.hunks)
+   bcache.pending_signs = gs_hunks.process_hunks(bcache.hunks)
 
    await(scheduler())
 
@@ -195,197 +171,6 @@ local watch_index = function(bufnr, gitdir)
    return w
 end
 
-local stage_hunk = async_void(function()
-   local bufnr = current_buf()
-   local bcache = cache[bufnr]
-   if not bcache then
-      return
-   end
-
-   if not util.path_exists(bcache.file) then
-      print("Error: Cannot stage lines. Please add the file to the working tree.")
-      return
-   end
-
-   local hunk = get_cursor_hunk(bufnr, bcache.hunks)
-   if not hunk then
-      return
-   end
-
-   await(bcache.git_obj:stage_hunks({ hunk }))
-
-   table.insert(bcache.staged_diffs, hunk)
-   bcache.compare_text = nil
-
-   local hunk_signs = process_hunks({ hunk })
-
-   await(scheduler())
-
-
-
-
-
-
-   for lnum, _ in pairs(hunk_signs) do
-      signs.remove(bufnr, lnum)
-   end
-end)
-
-local function reset_hunk(bufnr, hunk)
-   bufnr = bufnr or current_buf()
-   hunk = hunk or get_cursor_hunk(bufnr)
-   if not hunk then
-      return
-   end
-
-   local lstart, lend
-   if hunk.type == 'delete' then
-      lstart = hunk.start
-      lend = hunk.start
-   else
-      local length = vim.tbl_count(vim.tbl_filter(function(l)
-         return vim.startswith(l, '+')
-      end, hunk.lines))
-
-      lstart = hunk.start - 1
-      lend = hunk.start - 1 + length
-   end
-   api.nvim_buf_set_lines(bufnr, lstart, lend, false, gs_hunks.extract_removed(hunk))
-end
-
-local reset_buffer = async_void(function()
-   local bufnr = current_buf()
-   local bcache = cache[bufnr]
-   if not bcache then
-      return
-   end
-
-   local limit = 1000
-
-
-   for _ = 1, limit do
-      if not bcache.hunks[1] then
-         return
-      end
-      reset_hunk(bufnr, bcache.hunks[1])
-      await(update(bufnr, bcache))
-   end
-   error('Hit maximum limit of hunks to reset')
-end)
-
-local undo_stage_hunk = async_void(function()
-   local bufnr = current_buf()
-   local bcache = cache[bufnr]
-   if not bcache then
-      return
-   end
-
-   local hunk = table.remove(bcache.staged_diffs)
-   if not hunk then
-      print("No hunks to undo")
-      return
-   end
-
-   await(bcache.git_obj:stage_hunks({ hunk }, true))
-   bcache.compare_text = nil
-   await(scheduler())
-   signs.add(config, bufnr, process_hunks({ hunk }))
-end)
-
-local stage_buffer = async_void(function()
-   local bufnr = current_buf()
-
-   local bcache = cache[bufnr]
-   if not bcache then
-      return
-   end
-
-
-   local hunks = bcache.hunks
-   if #hunks == 0 then
-      print("No unstaged changes in file to stage")
-      return
-   end
-
-   if not util.path_exists(bcache.git_obj.file) then
-      print("Error: Cannot stage file. Please add it to the working tree.")
-      return
-   end
-
-   await(bcache.git_obj:stage_hunks(hunks))
-
-   for _, hunk in ipairs(hunks) do
-      table.insert(bcache.staged_diffs, hunk)
-   end
-   bcache.compare_text = nil
-
-   await(scheduler())
-   signs.remove(bufnr)
-   Status:clear_diff(bufnr)
-end)
-
-local reset_buffer_index = async_void(function()
-   local bufnr = current_buf()
-   local bcache = cache[bufnr]
-   if not bcache then
-      return
-   end
-
-
-
-
-
-
-
-   local hunks = bcache.staged_diffs
-   bcache.staged_diffs = {}
-
-   await(bcache.git_obj:unstage_file())
-   bcache.compare_text = nil
-
-   await(scheduler())
-   signs.add(config, bufnr, process_hunks(hunks))
-end)
-
-local NavHunkOpts = {}
-
-
-
-
-local function nav_hunk(options)
-   local bcache = cache[current_buf()]
-   if not bcache then
-      return
-   end
-   local hunks = bcache.hunks
-   if not hunks or vim.tbl_isempty(hunks) then
-      return
-   end
-   local line = api.nvim_win_get_cursor(0)[1]
-
-   local wrap = options.wrap ~= nil and options.wrap or vim.o.wrapscan
-   local hunk = gs_hunks.find_nearest_hunk(line, hunks, options.forwards, wrap)
-   local row = options.forwards and hunk.start or hunk.vend
-   if row then
-
-      if row == 0 then
-         row = 1
-      end
-      api.nvim_win_set_cursor(0, { row, 0 })
-   end
-end
-
-local function next_hunk(options)
-   options = options or {}
-   options.forwards = true
-   nav_hunk(options)
-end
-
-local function prev_hunk(options)
-   options = options or {}
-   options.forwards = false
-   nav_hunk(options)
-end
 
 
 
@@ -662,15 +447,32 @@ local function _complete(arglead, line)
 
    local matches = {}
    if n == 2 then
-      for func, _ in pairs(M) do
-         if vim.startswith(func, '_') then
+      local function get_matches(t)
+         for func, _ in pairs(t) do
+            if vim.startswith(func, '_') then
 
-         elseif vim.startswith(func, arglead) then
-            table.insert(matches, func)
+            elseif vim.startswith(func, arglead) then
+               table.insert(matches, func)
+            end
          end
       end
+
+      get_matches(require('gitsigns.actions'))
+      get_matches(M)
    end
    return matches
+end
+
+local function _run_func(func, ...)
+   local actions = require('gitsigns.actions')
+   if type(actions[func]) == 'function' then
+      actions[func](...)
+      return
+   end
+   if type(M[func]) == 'function' then
+      M[func](...)
+      return
+   end
 end
 
 local function setup_command()
@@ -761,57 +563,6 @@ local setup = async_void(function(cfg)
    setup_current_line_blame()
 end)
 
-local function preview_hunk()
-   local hunk = get_cursor_hunk()
-   if not hunk then return end
-
-   local gs_popup = require('gitsigns.popup')
-
-   local _, bufnr = gs_popup.create(hunk.lines, config.preview_config)
-   api.nvim_buf_set_option(bufnr, 'filetype', 'diff')
-end
-
-local function select_hunk()
-   local hunk = get_cursor_hunk()
-   if not hunk then return end
-
-   vim.cmd('normal! ' .. hunk.start .. 'GV' .. hunk.vend .. 'G')
-end
-
-local blame_line = async_void(function()
-   local bufnr = current_buf()
-   local bcache = cache[bufnr]
-   if not bcache then return end
-
-   local buftext = api.nvim_buf_get_lines(bufnr, 0, -1, false)
-   local lnum = api.nvim_win_get_cursor(0)[1]
-   local result = await(bcache.git_obj:run_blame(buftext, lnum))
-
-   local date = os.date('%Y-%m-%d %H:%M', tonumber(result['author_time']))
-   local lines = {
-      ('%s %s (%s):'):format(result.abbrev_sha, result.author, date),
-      result.summary,
-   }
-
-   await(scheduler())
-
-   local gs_popup = require('gitsigns.popup')
-
-   local _, pbufnr = gs_popup.create(lines, config.preview_config)
-
-   local p1 = #result.abbrev_sha
-   local p2 = #result.author
-   local p3 = #date
-
-   local function add_highlight(hlgroup, line, start, length)
-      api.nvim_buf_add_highlight(pbufnr, -1, hlgroup, line, start, start + length)
-   end
-
-   add_highlight('Directory', 0, 0, p1)
-   add_highlight('MoreMsg', 0, p1 + 1, p2)
-   add_highlight('Label', 0, p1 + p2 + 2, p3 + 2)
-end)
-
 local _current_line_blame_reset = function(bufnr)
    bufnr = bufnr or current_buf()
    api.nvim_buf_del_extmark(bufnr, namespace, 1)
@@ -869,17 +620,6 @@ end
 
 M = {
    update = update_debounced,
-   stage_hunk = mk_repeatable(stage_hunk),
-   undo_stage_hunk = mk_repeatable(undo_stage_hunk),
-   reset_hunk = mk_repeatable(reset_hunk),
-   stage_buffer = stage_buffer,
-   reset_buffer_index = reset_buffer_index,
-   next_hunk = next_hunk,
-   prev_hunk = prev_hunk,
-   select_hunk = select_hunk,
-   preview_hunk = preview_hunk,
-   blame_line = blame_line,
-   reset_buffer = reset_buffer,
    attach = void(attach),
    detach = detach,
    detach_all = detach_all,
@@ -895,6 +635,7 @@ M = {
    end,
 
    _complete = _complete,
+   _run_func = _run_func,
 
    _current_line_blame = _current_line_blame,
    _current_line_blame_reset = _current_line_blame_reset,
@@ -903,9 +644,27 @@ M = {
    _update_highlights = function()
       setup_signs_and_highlights()
    end,
-   _run_func = function(func, ...)
-      M[func](...)
-   end,
 }
+
+
+for _, f in ipairs({
+      'stage_hunk',
+      'undo_stage_hunk',
+      'reset_hunk',
+      'stage_buffer',
+      'reset_buffer',
+      'reset_buffer_index',
+      'next_hunk',
+      'prev_hunk',
+      'preview_hunk',
+      'select_hunk',
+      'blame_line',
+   }) do
+   M[f] = function()
+      print(string.format("Warning: Gitsigns function '%s()' has moved to 'gitsigns.actions'. Please update your config and mappings.", f))
+      local actions = require('gitsigns.actions')
+      actions[f]()
+   end
+end
 
 return M

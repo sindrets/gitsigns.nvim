@@ -53,6 +53,7 @@ local M = {Config = {SignsConfig = {}, watch_index = {}, yadm = {}, }, }
 
 
 
+
 M.schema = {
    signs = {
       type = 'table',
@@ -95,20 +96,20 @@ M.schema = {
          noremap = true,
          buffer = true,
 
-         ['n ]c'] = { expr = true, "&diff ? ']c' : '<cmd>lua require\"gitsigns\".next_hunk()<CR>'" },
-         ['n [c'] = { expr = true, "&diff ? '[c' : '<cmd>lua require\"gitsigns\".prev_hunk()<CR>'" },
+         ['n ]c'] = { expr = true, "&diff ? ']c' : '<cmd>lua require\"gitsigns.actions\".next_hunk()<CR>'" },
+         ['n [c'] = { expr = true, "&diff ? '[c' : '<cmd>lua require\"gitsigns.actions\".prev_hunk()<CR>'" },
 
-         ['n <leader>hs'] = '<cmd>lua require"gitsigns".stage_hunk()<CR>',
-         ['n <leader>hu'] = '<cmd>lua require"gitsigns".undo_stage_hunk()<CR>',
-         ['n <leader>hr'] = '<cmd>lua require"gitsigns".reset_hunk()<CR>',
-         ['n <leader>hR'] = '<cmd>lua require"gitsigns".reset_buffer()<CR>',
-         ['n <leader>hp'] = '<cmd>lua require"gitsigns".preview_hunk()<CR>',
-         ['n <leader>hb'] = '<cmd>lua require"gitsigns".blame_line()<CR>',
-         ['n <leader>hS'] = '<cmd>lua require"gitsigns".stage_buffer()<CR>',
-         ['n <leader>hU'] = '<cmd>lua require"gitsigns".reset_buffer_index()<CR>',
+         ['n <leader>hs'] = '<cmd>lua require"gitsigns.actions".stage_hunk()<CR>',
+         ['n <leader>hu'] = '<cmd>lua require"gitsigns.actions".undo_stage_hunk()<CR>',
+         ['n <leader>hr'] = '<cmd>lua require"gitsigns.actions".reset_hunk()<CR>',
+         ['n <leader>hR'] = '<cmd>lua require"gitsigns.actions".reset_buffer()<CR>',
+         ['n <leader>hp'] = '<cmd>lua require"gitsigns.actions".preview_hunk()<CR>',
+         ['n <leader>hb'] = '<cmd>lua require"gitsigns.actions".blame_line()<CR>',
+         ['n <leader>hS'] = '<cmd>lua require"gitsigns.actions".stage_buffer()<CR>',
+         ['n <leader>hU'] = '<cmd>lua require"gitsigns.actions".reset_buffer_index()<CR>',
 
-         ['o ih'] = ':<C-U>lua require"gitsigns".select_hunk()<CR>',
-         ['x ih'] = ':<C-U>lua require"gitsigns".select_hunk()<CR>',
+         ['o ih'] = ':<C-U>lua require"gitsigns.actions".select_hunk()<CR>',
+         ['x ih'] = ':<C-U>lua require"gitsigns.actions".select_hunk()<CR>',
       },
       description = [[
       Keymaps to set up when attaching to a buffer.
@@ -461,7 +462,8 @@ function M.build(user_config)
       end
    end
 
-   return config
+   M.config = config
+   return M.config
 end
 
 return M
